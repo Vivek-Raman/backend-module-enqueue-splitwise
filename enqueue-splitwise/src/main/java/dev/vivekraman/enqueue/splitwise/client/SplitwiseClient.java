@@ -1,57 +1,18 @@
 package dev.vivekraman.enqueue.splitwise.client;
 
-import com.github.scribejava.core.model.Response;
-import com.github.scribejava.core.model.Token;
-import com.github.scribejava.core.model.Verb;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 
-/**
- * Java SDK for Splitwise. Authentication is done using OAuth1.0
- */
 public class SplitwiseClient {
-
   private String consumerKey, consumerSecret;
   protected OAuthUtil util;
 
-  /**
-   * Constructor.
-   * @param consumerKey consumerKey provided by splitwise
-   * @param consumerSecret consumerSecret provided by splitwise
-   */
   public SplitwiseClient(String consumerKey, String consumerSecret) {
     this.consumerKey = consumerKey;
     this.consumerSecret = consumerSecret;
     this.util = new OAuthUtil()
       .setApiKey(this.consumerKey)
-      .setApiSecret(this.consumerSecret)
-      .build(Splitwise10Api.instance());
-  }
-
-  /**
-   * Returns authorization url using which user can get token verifier.
-   * @return authorization url
-   * @throws InterruptedException
-   * @throws ExecutionException
-   * @throws IOException
-   */
-  public String getAuthorizationUrl() throws InterruptedException, ExecutionException, IOException {
-    return this.util.getAuthorizationUrl();
-  }
-
-  /**
-   * Authenticates with splitwise with the verifier passed and returns the token details.
-   * @param verifier
-   * @return Token details provided by OAuth
-   * @throws InterruptedException
-   * @throws ExecutionException
-   * @throws IOException
-   */
-  public Token getAccessToken(String verifier) throws InterruptedException, ExecutionException, IOException {
-    this.util.setAccessToken(verifier);
-    return this.util.getAccessToken();
+      .setApiSecret(this.consumerSecret);
   }
 
   /**
@@ -66,6 +27,13 @@ public class SplitwiseClient {
     );
     if (response.getCode() == 200) return response.getBody();
     return null;
+  }
+
+  /**
+   * OAuth2 client-credentials: obtain and store bearer token for subsequent calls.
+   */
+  public void requestAccessToken() throws Exception {
+    this.util.requestOAuth2ClientCredentialsToken();
   }
 
   /**

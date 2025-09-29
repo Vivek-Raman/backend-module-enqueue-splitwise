@@ -1,26 +1,20 @@
 package dev.vivekraman.enqueue.splitwise.client;
 
-import com.github.scribejava.core.builder.ServiceBuilder;
-import com.github.scribejava.core.builder.api.DefaultApi10a;
-import com.github.scribejava.core.model.*;
-import com.github.scribejava.core.oauth.OAuth10aService;
-
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-
 
 /**
- * Utility class that performs OAuth authentication.
+ * OAuth2 utility for client-credentials and HMAC-SHA1 signing with Bearer tokens.
  */
 public class OAuthUtil {
     private String apiKey;
     private String apiSecret;
-    private OAuth10aService service;
-    private OAuth1RequestToken requestToken;
-    private OAuth1AccessToken accessToken;
+    private String oauth2BearerToken;
     private List<Integer> httpErrorCodes = new ArrayList<Integer>() {{
         add(400);
         add(401);
@@ -30,152 +24,106 @@ public class OAuthUtil {
         add(503);
     }};
 
-    /**
-     * Set the consumer key of the API.
-     * @param apiKey consumer key
-     * @return OAuthUtil instance
-     */
     public OAuthUtil setApiKey(String apiKey) {
         this.apiKey = apiKey;
         return this;
     }
 
-    /**
-     * Set the consumer secret of the API.
-     * @param apiSecret consumer secret
-     * @return OAuthUtil instance
-     */
     public OAuthUtil setApiSecret(String apiSecret) {
         this.apiSecret = apiSecret;
         return this;
     }
 
-    /**
-     * Returns the authorization url from apiKey and apiSecret.
-     * @return authorization url
-     * @throws InterruptedException
-     * @throws ExecutionException
-     * @throws IOException
-     */
-    public String getAuthorizationUrl() throws InterruptedException, ExecutionException, IOException {
-        this.requestToken = service.getRequestToken();
-        String authUrl = service.getAuthorizationUrl(requestToken);
-        return authUrl;
+    public String getBearerToken() {
+        return this.oauth2BearerToken;
     }
 
-    /**
-     * Sets the access token by using the token verifier received from authorization url.
-     * @param verifier token verifier
-     * @throws InterruptedException
-     * @throws ExecutionException
-     * @throws IOException
-     */
-    public void setAccessToken(String verifier) throws InterruptedException, ExecutionException, IOException {
-        this.accessToken = this.service.getAccessToken(requestToken, verifier);
-    }
-
-    /**
-     * Set the access token details.
-     * @param token access token
-     * @param tokenSecret access token secret
-     * @param rawResponse raw response of the access token
-     */
-    public void setAccessToken(String token, String tokenSecret, String rawResponse){
-        this.accessToken = new OAuth1AccessToken(token, tokenSecret, rawResponse);
-    }
-
-    /**
-     * Returns the access token details received.
-     * @return access token details received
-     */
-    public Token getAccessToken(){
-        return this.accessToken;
-    }
-
-    /**
-     * Generates the API request, communicates to the API and returns the response.
-     * @param url URL to communicate
-     * @param httpMethod GET or POST
-     * @param data data to be sent if the httpMethod is POST
-     * @return response from the API
-     * @throws Exception
-     */
-    @SuppressWarnings("unchecked")
     public Response makeRequest(String url, Verb httpMethod, Object... data) throws Exception {
-        OAuthRequest request = new OAuthRequest(httpMethod, url);
-        if (data.length > 0 && data[0] instanceof Map){
+        java.net.URI uri = java.net.URI.create(url);
+        URLConnection conn = uri.toURL().openConnection();
+        if (!(conn instanceof HttpURLConnection)) {
+            throw new Exception("Invalid protocol for API endpoint");
+        }
+        HttpURLConnection http = (HttpURLConnection) conn;
+        http.setRequestMethod(httpMethod == Verb.POST ? "POST" : "GET");
+        http.setRequestProperty("Accept", "application/json");
+        if (this.oauth2BearerToken != null) {
+            http.setRequestProperty("Authorization", "Bearer " + this.oauth2BearerToken);
+        }
+        if (httpMethod == Verb.POST && data.length > 0 && data[0] instanceof Map) {
+            @SuppressWarnings("unchecked")
             Map<String, String> details = (Map<String, String>) data[0];
-            for (Map.Entry<String, String> entry: details.entrySet()){
-                request.addBodyParameter(entry.getKey(), entry.getValue());
+            StringBuilder form = new StringBuilder();
+            for (Map.Entry<String, String> entry : details.entrySet()) {
+                if (form.length() > 0) form.append('&');
+                form.append(encode(entry.getKey())).append('=').append(encode(entry.getValue()));
             }
+            byte[] out = form.toString().getBytes(StandardCharsets.UTF_8);
+            http.setDoOutput(true);
+            http.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            http.getOutputStream().write(out);
         }
-        this.service.signRequest(this.accessToken, request);
-
-        Response response = null;
+        int code = http.getResponseCode();
+        String body;
         try {
-            response = this.service.execute(request);
-        } catch (InterruptedException e) {
-            throw new Exception(String.format(
-                    "Invalid response received - %s. " +
-                            "Please check your client id and secret.", e.getMessage()));
-        } catch (ExecutionException e) {
-            throw new Exception(String.format(
-                    "Invalid response received - %s. " +
-                            "Please check your client id and secret.", e.getMessage()));
+            body = new String((code >= 200 && code < 400 ? http.getInputStream() : http.getErrorStream()).readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new Exception(String.format(
-                    "Invalid response received - %s. " +
-                            "Please check your client id and secret.", e.getMessage()));
-        } catch (Exception e) {
-            throw new Exception(String.format(
-                    "Invalid response received - %s. " +
-                            "Please check your client id and secret.", e.getMessage()));
+            body = "";
         }
+        Response response = new Response(code, body, http.getResponseMessage());
         return parseResponse(response);
     }
 
-    /**
-     * Parse the response from the API
-     * @param response response from the API
-     * @return response if the response code is 200
-     * @throws Exception throws exception for other response codes
-     */
+    public void requestOAuth2ClientCredentialsToken() throws Exception {
+        String body = "grant_type=client_credentials&client_id=" + encode(apiKey)
+                + "&client_secret=" + encode(apiSecret);
+        java.net.URI tokenUri = java.net.URI.create(dev.vivekraman.enqueue.splitwise.client.URL.OAUTH2_TOKEN);
+        URLConnection conn = tokenUri.toURL().openConnection();
+        if (!(conn instanceof HttpURLConnection)) {
+            throw new Exception("Invalid protocol for token endpoint");
+        }
+        HttpURLConnection http = (HttpURLConnection) conn;
+        http.setRequestMethod("POST");
+        http.setDoOutput(true);
+        http.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        byte[] out = body.getBytes(StandardCharsets.UTF_8);
+        http.getOutputStream().write(out);
+        int code = http.getResponseCode();
+        if (code != 200) {
+            throw new Exception("Failed to fetch OAuth2 token. HTTP status: " + code);
+        }
+        String response = new String(http.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String token = parseAccessTokenFromJson(response);
+        if (token == null || token.isEmpty()) {
+            throw new Exception("OAuth2 token response did not contain access_token");
+        }
+        this.oauth2BearerToken = token;
+    }
+
+    private static String encode(String value) {
+        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String parseAccessTokenFromJson(String json) {
+        int idx = json.indexOf("\"access_token\"");
+        if (idx < 0) return null;
+        int colon = json.indexOf(':', idx);
+        if (colon < 0) return null;
+        int startQuote = json.indexOf('"', colon + 1);
+        if (startQuote < 0) return null;
+        int endQuote = json.indexOf('"', startQuote + 1);
+        if (endQuote < 0) return null;
+        return json.substring(startQuote + 1, endQuote);
+    }
+
     private Response parseResponse(Response response) throws Exception {
         if (httpErrorCodes.contains(response.getCode())){
             throw new Exception(String.format(
-                    "Invalid response received with body - %s, message - %s. " +
-                            "Please check your client id and secret. Response code - %s", response.getBody(),
+                    "Invalid response received with body - %s, message - %s. Please check your credentials. Response code - %s",
+                    response.getBody(),
                     response.getMessage(),
                     response.getCode()));
         }
         return response;
-    }
-
-    /**
-     * Utility builder for OAuth authentication
-     * @param instance API instance containing OAuth details
-     * @return OAuthUtil instance
-     */
-    public OAuthUtil build(DefaultApi10a instance){
-        this.service = new ServiceBuilder(this.apiKey)
-                .apiSecret(this.apiSecret)
-                .build(instance);
-        return this;
-    }
-
-    /**
-     * Utility builder for OAuth authentication
-     * @param apiKey consumerKey
-     * @param apiSecret consuerSecret
-     * @param instance API instance containing OAuth details
-     * @return OAuthUtil instance
-     */
-    public OAuthUtil build(String apiKey, String apiSecret, DefaultApi10a instance){
-        setApiKey(apiKey);
-        setApiSecret(apiSecret);
-        this.service = new ServiceBuilder(this.apiKey)
-                .apiSecret(this.apiSecret)
-                .build(instance);
-        return this;
     }
 }

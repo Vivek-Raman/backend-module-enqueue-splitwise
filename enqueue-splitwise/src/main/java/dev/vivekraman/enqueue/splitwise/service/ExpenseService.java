@@ -3,7 +3,6 @@ package dev.vivekraman.enqueue.splitwise.service;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import dev.vivekraman.enqueue.splitwise.client.SplitwiseClient;
 import lombok.RequiredArgsConstructor;
@@ -14,16 +13,11 @@ import reactor.core.publisher.Mono;
 public class ExpenseService {
   
   public Mono<Boolean> createBlankExpenseInGroup(String clientID, String clientSecret, String groupID) {
-    WebClient webClient = WebClient.create();
     try {
 
       SplitwiseClient splitwiseClient = new SplitwiseClient(clientID, clientSecret);
-      String authURL = splitwiseClient.getAuthorizationUrl();
-      // webClient.get()
-      //   .uri(authURL)
-      //   .retrieve()
-      //   .bodyToMono(String.class)
-      //   .block();
+      // Obtain OAuth2 access token using client credentials
+      splitwiseClient.requestAccessToken();
 
       splitwiseClient.createExpense(Map.of(
           "group_id", groupID,

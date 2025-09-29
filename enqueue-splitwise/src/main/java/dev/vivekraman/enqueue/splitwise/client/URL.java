@@ -6,6 +6,7 @@ package dev.vivekraman.enqueue.splitwise.client;
 public class URL {
     public static final String BASE_URL = String.format("https://secure.splitwise.com/api/%s",
             Strings.SPLITWISE_API_VERSION);
+    public static final String OAUTH2_TOKEN = "https://secure.splitwise.com/oauth/token";
 
     //URLs for Users API
     public static final String GET_CURRENT_USER = BASE_URL +"/get_current_user";
